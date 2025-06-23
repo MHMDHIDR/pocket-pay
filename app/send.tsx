@@ -3,12 +3,13 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Send, DollarSign, Mail, MessageCircle, CircleCheck as CheckCircle } from 'lucide-react-native';
-import { useAuth, mockUsers } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { TransactionProvider, useTransactions } from '@/contexts/TransactionContext';
+import { apiClient } from '@/lib/api';
 
 function SendContent() {
-  const { user, updateBalance } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { addNotification } = useNotifications();
   const { addTransaction } = useTransactions();
   const [isLoading, setIsLoading] = useState(false);
@@ -38,7 +39,7 @@ function SendContent() {
     setFormData({ ...formData, amount: cleanText });
   };
 
-  const validateForm = () => {
+  const validateForm = async () => {
     if (!formData.email) {
       Alert.alert('Error', 'Please enter recipient email');
       return false;
@@ -66,18 +67,23 @@ function SendContent() {
     }
 
     // Check if recipient exists
-    const foundRecipient = mockUsers.find(u => u.email === formData.email);
-    if (!foundRecipient) {
-      Alert.alert('Error', 'Recipient not found. Please check the email address.');
+    try {
+      const response = await apiClient.searchUser(formData.email);
+      if (response.success && response.data) {
+        setRecipient(response.data);
+        return true;
+      } else {
+        Alert.alert('Error', 'Recipient not found. Please check the email address.');
+        return false;
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to verify recipient. Please try again.');
       return false;
     }
-
-    setRecipient(foundRecipient);
-    return true;
   };
 
-  const handleNext = () => {
-    if (validateForm()) {
+  const handleNext = async () => {
+    if (await validateForm()) {
       setStep(2);
     }
   };
@@ -86,28 +92,18 @@ function SendContent() {
     setIsLoading(true);
 
     try {
-      // Simulate transaction processing
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
       const amount = parseFloat(formData.amount);
       
-      // Update sender balance
-      updateBalance(-amount);
-      
-      // Update recipient balance (in real app, this would be handled by backend)
-      const recipientIndex = mockUsers.findIndex(u => u.email === formData.email);
-      if (recipientIndex !== -1) {
-        mockUsers[recipientIndex].balance += amount;
-      }
-      
-      // Add transaction record for sender
-      addTransaction({
+      // Create the transaction
+      await addTransaction({
         type: 'send',
         amount: amount,
         recipientEmail: formData.email,
-        description: formData.message || 'Money transfer',
-        status: 'completed'
+        description: formData.message || 'Money transfer'
       });
+
+      // Refresh user data to get updated balance
+      await refreshUser();
 
       // Show success notification
       addNotification(
@@ -116,8 +112,8 @@ function SendContent() {
       );
 
       setStep(3);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to send money. Please try again.');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to send money. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -204,21 +200,6 @@ function SendContent() {
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
-              </View>
-              
-              {/* Quick Contacts */}
-              <Text style={styles.quickContactsTitle}>Quick Contacts</Text>
-              <View style={styles.quickContacts}>
-                {mockUsers.filter(u => u.email !== user.email).slice(0, 3).map((contact) => (
-                  <TouchableOpacity
-                    key={contact.id}
-                    style={styles.quickContact}
-                    onPress={() => setFormData({ ...formData, email: contact.email })}
-                  >
-                    <Text style={styles.quickContactName}>{contact.name}</Text>
-                    <Text style={styles.quickContactEmail}>{contact.email}</Text>
-                  </TouchableOpacity>
-                ))}
               </View>
             </View>
 
@@ -444,33 +425,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-Regular',
     color: '#111827',
     paddingVertical: 16,
-  },
-  quickContactsTitle: {
-    fontSize: 14,
-    fontFamily: 'Inter-SemiBold',
-    color: '#374151',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  quickContacts: {
-    gap: 8,
-  },
-  quickContact: {
-    backgroundColor: '#FFFFFF',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  quickContactName: {
-    fontSize: 14,
-    fontFamily: 'Inter-SemiBold',
-    color: '#111827',
-  },
-  quickContactEmail: {
-    fontSize: 12,
-    fontFamily: 'Inter-Regular',
-    color: '#6B7280',
   },
   amountContainer: {
     alignItems: 'center',

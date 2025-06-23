@@ -1,71 +1,76 @@
-import React, { createContext, useContext, useState } from 'react';
-
-export interface Transaction {
-  id: string;
-  type: 'send' | 'receive' | 'charge';
-  amount: number;
-  recipientEmail?: string;
-  senderEmail?: string;
-  description?: string;
-  timestamp: Date;
-  status: 'completed' | 'pending' | 'failed';
-}
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { apiClient } from '@/lib/api';
+import { Transaction } from '@/types';
+import { useAuth } from './AuthContext';
 
 interface TransactionContextType {
   transactions: Transaction[];
-  addTransaction: (transaction: Omit<Transaction, 'id' | 'timestamp'>) => void;
+  addTransaction: (transaction: {
+    type: 'send' | 'charge';
+    amount: number;
+    recipientEmail?: string;
+    description?: string;
+  }) => Promise<void>;
   getTransactionHistory: (userEmail: string) => Transaction[];
+  refreshTransactions: () => Promise<void>;
+  isLoading: boolean;
 }
 
 const TransactionContext = createContext<TransactionContextType | undefined>(undefined);
 
-// Mock transaction data
-const mockTransactions: Transaction[] = [
-  {
-    id: '1',
-    type: 'receive',
-    amount: 25.00,
-    senderEmail: 'jane@college.edu',
-    timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-    status: 'completed'
-  },
-  {
-    id: '2',
-    type: 'send',
-    amount: 15.50,
-    recipientEmail: 'mike@university.edu',
-    description: 'Coffee money',
-    timestamp: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000), // 1 day ago
-    status: 'completed'
-  },
-  {
-    id: '3',
-    type: 'charge',
-    amount: 50.00,
-    description: 'Added funds',
-    timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000), // 3 hours ago
-    status: 'completed'
-  }
-];
-
 export function TransactionProvider({ children }: { children: React.ReactNode }) {
-  const [transactions, setTransactions] = useState<Transaction[]>(mockTransactions);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const { user } = useAuth();
 
-  const addTransaction = (transactionData: Omit<Transaction, 'id' | 'timestamp'>) => {
-    const newTransaction: Transaction = {
-      ...transactionData,
-      id: Date.now().toString(),
-      timestamp: new Date()
-    };
-    
-    setTransactions(prev => [newTransaction, ...prev]);
+  useEffect(() => {
+    if (user) {
+      refreshTransactions();
+    } else {
+      setTransactions([]);
+    }
+  }, [user]);
+
+  const refreshTransactions = async () => {
+    if (!user) return;
+
+    setIsLoading(true);
+    try {
+      const response = await apiClient.getTransactionHistory();
+      if (response.success && response.data) {
+        setTransactions(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch transactions:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const addTransaction = async (transactionData: {
+    type: 'send' | 'charge';
+    amount: number;
+    recipientEmail?: string;
+    description?: string;
+  }) => {
+    try {
+      const response = await apiClient.createTransaction(transactionData);
+      if (response.success) {
+        // Refresh transactions to get the latest data
+        await refreshTransactions();
+      } else {
+        throw new Error(response.message || 'Transaction failed');
+      }
+    } catch (error) {
+      console.error('Transaction error:', error);
+      throw error;
+    }
   };
 
   const getTransactionHistory = (userEmail: string) => {
     return transactions.filter(t => 
       t.senderEmail === userEmail || 
-      t.recipientEmail === userEmail ||
-      t.type === 'charge'
+      t.recipientEmail === userEmail
     );
   };
 
@@ -73,7 +78,9 @@ export function TransactionProvider({ children }: { children: React.ReactNode })
     <TransactionContext.Provider value={{
       transactions,
       addTransaction,
-      getTransactionHistory
+      getTransactionHistory,
+      refreshTransactions,
+      isLoading
     }}>
       {children}
     </TransactionContext.Provider>

@@ -8,7 +8,7 @@ import { useNotifications } from '@/contexts/NotificationContext';
 import { TransactionProvider, useTransactions } from '@/contexts/TransactionContext';
 
 function ChargeContent() {
-  const { user, updateBalance } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { addNotification } = useNotifications();
   const { addTransaction } = useTransactions();
   const [isLoading, setIsLoading] = useState(false);
@@ -107,22 +107,18 @@ function ChargeContent() {
 
     setIsLoading(true);
 
-    // Simulate payment processing
     try {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
       const amount = parseFloat(formData.amount);
       
-      // Update user balance
-      updateBalance(amount);
-      
-      // Add transaction record
-      addTransaction({
+      // Create the transaction
+      await addTransaction({
         type: 'charge',
         amount: amount,
-        description: `Added funds via ****${formData.cardNumber.slice(-4)}`,
-        status: 'completed'
+        description: `Added funds via ****${formData.cardNumber.slice(-4)}`
       });
+
+      // Refresh user data to get updated balance
+      await refreshUser();
 
       // Show success notification
       addNotification(
@@ -140,8 +136,8 @@ function ChargeContent() {
           }
         ]
       );
-    } catch (error) {
-      Alert.alert('Error', 'Failed to process payment. Please try again.');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to process payment. Please try again.');
     } finally {
       setIsLoading(false);
     }
